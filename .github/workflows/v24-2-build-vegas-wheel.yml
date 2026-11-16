@@ -41,10 +41,15 @@ jobs:
         env:
           CIBW_BUILD: "cp313-manylinux_x86_64"
           CIBW_ARCHS_LINUX: "x86_64"
-          CIBW_TEST_COMMAND: "python -c \"import VegasAfterglow; from VegasAfterglow import Ejecta; print(VegasAfterglow.__file__)\""
+          CIBW_TEST_COMMAND: 'python -c "import VegasAfterglow; from VegasAfterglow import Ejecta; print(VegasAfterglow.__file__)"'
           CIBW_ENVIRONMENT_LINUX: "CMAKE_ARGS='-DAFTERGLOW_MARCH_NATIVE=OFF'"
 
-      - name: Download V24 Python runtime dependencies\n        run: |\n          mkdir -p wheelhouse/deps\n          python -m pip download --only-binary=:all: --dest wheelhouse/deps numpy==2.4.6 scipy==1.18.0 pandas==3.0.5 astropy==8.0.1 matplotlib==3.11.1 dust-extinction==1.7 numba==0.66.0 nbformat==5.10.4 nbclient==0.10.2 ipykernel==6.29.5\n\n      - name: Upload built wheel
+      - name: Download V24 Python runtime dependencies
+        run: |
+          mkdir -p wheelhouse/deps
+          python -m pip download --only-binary=:all: --dest wheelhouse/deps numpy==2.4.6 scipy==1.18.0 pandas==3.0.5 astropy==8.0.1 matplotlib==3.11.1 dust-extinction==1.7 numba==0.66.0 nbformat==5.10.4 nbclient==0.10.2 ipykernel==6.29.5
+
+      - name: Upload built wheel and runtime dependencies
         uses: actions/upload-artifact@v4
         with:
           name: vegasafterglow-linux-cp313-v24-2
