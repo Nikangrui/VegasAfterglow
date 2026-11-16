@@ -41,7 +41,8 @@ jobs:
       - name: Download V24 Python runtime dependencies
         run: |
           mkdir -p wheelhouse/deps
-          python -m pip download --only-binary=:all: --dest wheelhouse/deps numpy==2.4.6 scipy==1.18.0 pandas==3.0.5 astropy==8.0.1 matplotlib==3.11.1 numba==0.66.0 nbformat==5.10.4 nbclient==0.10.2 ipykernel==6.29.5\n          python -m pip download --no-deps --dest wheelhouse/deps dust-extinction==1.7
+          python -m pip download --only-binary=:all: --dest wheelhouse/deps numpy==2.4.6 scipy==1.18.0 pandas==3.0.5 astropy==8.0.1 matplotlib==3.11.1 numba==0.66.0 nbformat==5.10.4 nbclient==0.10.2 ipykernel==6.29.5
+          python -m pip download --no-deps --dest wheelhouse/deps dust-extinction==1.7
 
       - name: Upload built wheel and runtime dependencies
         uses: actions/upload-artifact@v4
