@@ -1,0 +1,243 @@
+diff --git a/pybind/pybind.cpp b/pybind/pybind.cpp
+index dae3d70..7d1e764 100644
+--- a/pybind/pybind.cpp
++++ b/pybind/pybind.cpp
+@@ -422,9 +422,11 @@ PYBIND11_MODULE(VegasAfterglowC, m) {
+              py::arg("radiative_fireball") = true)
+ 
+         .def("flux_density_grid", &PyModel::flux_density_grid, py::arg("t"), py::arg("nu"),
++             py::arg("core_edge") = -1., py::arg("sync_only") = false,
+              py::call_guard<py::gil_scoped_release>())
+ 
+         .def("flux_density", &PyModel::flux_density, py::arg("t"), py::arg("nu"),
++             py::arg("core_edge") = -1., py::arg("sync_only") = false,
+              py::call_guard<py::gil_scoped_release>())
+ 
+         .def("flux", &PyModel::flux, py::arg("t"), py::arg("nu_min"), py::arg("nu_max"), py::arg("num_nu"),
+ diff --git a/pybind/pymodel.cpp b/pybind/pymodel.cpp
+index 2e4d4e3..6cb72d5 100644
+--- a/pybind/pymodel.cpp
++++ b/pybind/pymodel.cpp
+@@ -370,7 +370,7 @@ static constexpr auto series_flux_mJy = [](Observer& obs, Array const& time, Arr
+     return obs.specific_flux_series(time, freq, photons) / unit::flux_den_cgs;
+ };
+ 
+-auto PyModel::flux_density(PyArray const& t, PyArray const& nu) -> PyFlux {
++auto PyModel::flux_density(PyArray const& t, PyArray const& nu, Real core_edge, bool sync_only) -> PyFlux {
+     AFTERGLOW_REQUIRE(t.size() > 0, "time array must be non-empty");
+     AFTERGLOW_REQUIRE(nu.size() > 0, "frequency array must be non-empty");
+     AFTERGLOW_REQUIRE(
+@@ -382,7 +382,13 @@ auto PyModel::flux_density(PyArray const& t, PyArray const& nu) -> PyFlux {
+     const Array t_obs = t * unit::sec;
+     const Array nu_obs = nu * unit::Hz;
+ 
+-    auto result = compute_emission(t_obs, nu_obs, series_flux_mJy);
++    auto flux_func = [core_edge](Observer& obs, Array const& time, Array const& freq, auto& photons) -> XTArray {
++        if (core_edge >= 0.) {
++            return obs.sector_flux_series(time, freq, photons, core_edge) / unit::flux_den_cgs;
++        }
++        return series_flux_mJy(obs, time, freq, photons);
++    };
++    auto result = compute_emission(t_obs, nu_obs, flux_func, sync_only);
+     result.calc_total();
+     rethrow_callback_error();
+     return result;
+@@ -495,7 +501,7 @@ auto PyModel::flux_density_exposures(PyArray const& t, PyArray const& nu, PyArra
+     return result;
+ }
+ 
+-auto PyModel::flux_density_grid(PyArray const& t, PyArray const& nu) -> PyFlux {
++auto PyModel::flux_density_grid(PyArray const& t, PyArray const& nu, Real core_edge, bool sync_only) -> PyFlux {
+     AFTERGLOW_REQUIRE(t.size() > 0, "time array must be non-empty");
+     AFTERGLOW_REQUIRE(nu.size() > 0, "frequency array must be non-empty");
+     AFTERGLOW_REQUIRE(is_ascending(t), "time array must be in ascending order");
+@@ -503,11 +509,14 @@ auto PyModel::flux_density_grid(PyArray const& t, PyArray const& nu) -> PyFlux {
+     const Array t_obs = t * unit::sec;
+     const Array nu_obs = nu * unit::Hz;
+ 
+-    auto flux_func = [](Observer& obs, Array const& time, Array const& freq, auto& photons) -> XTArray {
++    auto flux_func = [core_edge](Observer& obs, Array const& time, Array const& freq, auto& photons) -> XTArray {
++        if (core_edge >= 0.) {
++            return obs.sector_flux_grid(time, freq, photons, core_edge) / unit::flux_den_cgs;
++        }
+         return obs.specific_flux(time, freq, photons) / unit::flux_den_cgs;
+     };
+ 
+-    auto result = compute_emission(t_obs, nu_obs, flux_func);
++    auto result = compute_emission(t_obs, nu_obs, flux_func, sync_only);
+     result.calc_total();
+     rethrow_callback_error();
+     return result;
+ diff --git a/pybind/pymodel.h b/pybind/pymodel.h
+index 4903234..d48ae68 100644
+--- a/pybind/pymodel.h
++++ b/pybind/pymodel.h
+@@ -660,7 +660,7 @@ class PyModel {
+      * @return PyFlux Structure with synchrotron and inverse Compton flux components
+      * <!-- ************************************************************************************** -->
+      */
+-    PyFlux flux_density_grid(PyArray const& t, PyArray const& nu);
++    PyFlux flux_density_grid(PyArray const& t, PyArray const& nu, Real core_edge = -1., bool sync_only = false);
+ 
+     /**
+      * <!-- ************************************************************************************** -->
+@@ -673,7 +673,7 @@ class PyModel {
+      * @return PyFlux Structure with synchrotron and inverse Compton flux components
+      * <!-- ************************************************************************************** -->
+      */
+-    PyFlux flux_density(PyArray const& t, PyArray const& nu);
++    PyFlux flux_density(PyArray const& t, PyArray const& nu, Real core_edge = -1., bool sync_only = false);
+ 
+     /**
+      * <!-- ************************************************************************************** -->
+@@ -784,7 +784,7 @@ class PyModel {
+      * @return PyFlux Structure with synchrotron and inverse Compton flux components
+      * <!-- ************************************************************************************** -->
+      */
+-    PyFlux compute_emission(Array const& t_obs, Array const& nu_obs, Func&& flux_func);
++    PyFlux compute_emission(Array const& t_obs, Array const& nu_obs, Func&& flux_func, bool sync_only = false);
+ 
+     /**
+      * <!-- ************************************************************************************** -->
+@@ -807,7 +807,8 @@ class PyModel {
+      */
+     template <typename Func>
+     void single_shock_emission(Shock const& shock, Coord const& coord, Array const& t_obs, Array const& nu_obs,
+-                               Observer& obs, PyRadiation const& rad, Flux& emission, Func&& flux_func);
++                               Observer& obs, PyRadiation const& rad, Flux& emission, Func&& flux_func,
++                               bool sync_only);
+ 
+     /**
+      * <!-- ************************************************************************************** -->
+@@ -873,7 +874,8 @@ class PyModel {
+ 
+ template <typename Func>
+ void PyModel::single_shock_emission(Shock const& shock, Coord const& coord, Array const& t_obs, Array const& nu_obs,
+-                                    Observer& obs, PyRadiation const& rad, Flux& emission, Func&& flux_func) {
++                                    Observer& obs, PyRadiation const& rad, Flux& emission, Func&& flux_func,
++                                    bool sync_only) {
+     auto syn_e = [&] {
+         AFTERGLOW_PROFILE_SCOPE(syn_electrons);
+         return generate_syn_electrons(shock, coord);
+@@ -894,7 +896,7 @@ void PyModel::single_shock_emission(Shock const& shock, Coord const& coord, Array const& t_obs, Array const& nu_obs,
+         emission.sync = std::invoke(flux_func, obs, t_obs, nu_obs, syn_ph);
+     }
+ 
+-    if (rad.ssc) {
++    if (rad.ssc && !sync_only) {
+         // The observer samples IC spectra only at nu_obs (1+z) / D; restrict each
+         // cell's output grid to that comoving band instead of the full theoretical IC range (tens of decades wider).
+@@ -921,9 +923,9 @@ void PyModel::single_shock_emission(Shock const& shock, Coord const& coord, Array const& t_obs, Array const& nu_obs,
+ }
+ 
+ template <typename Func>
+-auto PyModel::compute_emission(Array const& t_obs, Array const& nu_obs, Func&& flux_func) -> PyFlux {
++auto PyModel::compute_emission(Array const& t_obs, Array const& nu_obs, Func&& flux_func, bool sync_only) -> PyFlux {
+     AFTERGLOW_PROFILE_SCOPE(total);
+ 
+     PyFlux flux;
+@@ -938,7 +940,7 @@ auto PyModel::compute_emission(Array const& t_obs, Array const& nu_obs, Func&& f
+             observer.observe(coord, fwd_shock, obs_setup.lumi_dist, obs_setup.z);
+         }
+         single_shock_emission(fwd_shock, coord, t_obs, nu_obs, observer, fwd_rad, flux.fwd,
+-                              std::forward<Func>(flux_func));
++                              std::forward<Func>(flux_func), sync_only);
+     } else {
+         auto [coord, fwd_shock, rvs_shock] = [&] {
+             AFTERGLOW_PROFILE_SCOPE(dynamics);
+@@ -952,9 +954,9 @@ auto PyModel::compute_emission(Array const& t_obs, Array const& nu_obs, Array const& freq, auto& photons) -> XTArray {
+             observer.observe(coord, fwd_shock, obs_setup.lumi_dist, obs_setup.z);
+         }
+         single_shock_emission(fwd_shock, coord, t_obs, nu_obs, observer, fwd_rad, flux.fwd,
+-                              std::forward<Func>(flux_func));
++                              std::forward<Func>(flux_func), sync_only);
+         single_shock_emission(rvs_shock, coord, t_obs, nu_obs, observer, *rvs_rad_opt, flux.rvs,
+-                              std::forward<Func>(flux_func));
++                              std::forward<Func>(flux_func), sync_only);
+     }
+     return flux;
+ }
+ diff --git a/src/core/observer.cpp b/src/core/observer.cpp
+index 9820e94..06af19e 100644
+--- a/src/core/observer.cpp
++++ b/src/core/observer.cpp @@ -222,6 +222,7 @@ void Observer::build_time_grid(Coord const& coord, Shock const& shock, Real lumi
+     }
+     theta_grid = theta_size;
++    launch_theta = coord.theta;
+     t_grid = t_size;
+     lumi_dist = luminosity_dist;
+     one_plus_z = 1 + redshift;
+ diff --git a/src/core/observer.h b/src/core/observer.h
+index 5a6c1fa..e8bca23 100644
+--- a/src/core/observer.h
++++ b/src/core/observer.h
+@@ -135,6 +135,11 @@ class Observer {
+     template <typename PhotonGrid>
+     MeshGrid specific_flux(Array const& t_obs, Array const& nu_obs, PhotonGrid& photons);
++
++    // Partition the same shock by the angular coordinate before lateral spreading.
++    template <typename PhotonGrid>
++    MeshGrid3d sector_flux_grid(Array const& t_obs, Array const& nu_obs, PhotonGrid& photons,
++                                Real core_edge);
+ 
+     /**
+      * <!-- ************************************************************************************** -->
+@@ -148,6 +153,10 @@ class Observer {
+     Array specific_flux_series(Array const& t_obs, Array const& nu_obs, PhotonGrid& photons);
++
++    template <typename PhotonGrid>
++    MeshGrid sector_flux_series(Array const& t_obs, Array const& nu_obs, PhotonGrid& photons,
++                                Real core_edge);
+ 
+     /**
+      * <!-- ************************************************************************************** -->
+@@ -215,6 +224,7 @@ class Observer {
+     MeshGrid3d lg2_geom_factor; ///< Log2 of observe frame geometric factor (solid angle * r^2 * D^3)
+     Real one_plus_z{1};         ///< 1 + redshift
+   private:
++    Array launch_theta;
+     Real lumi_dist{1}; ///< Luminosity distance
+     // Grid dimensions
+     size_t jet_3d{0};             ///< Flag indicating if the jet is non-axis-symmetric (non-zero if true)
+@@ -551,13 +561,21 @@ struct NodeTable {
+ template <typename PhotonGrid>
+ MeshGrid Observer::specific_flux(Array const& t_obs, Array const& nu_obs, PhotonGrid& photons) {
++    auto integrated = sector_flux_grid(t_obs, nu_obs, photons, -1.);
++    return xt::view(integrated, 0, xt::all(), xt::all());
++}
++
++template <typename PhotonGrid>
++MeshGrid3d Observer::sector_flux_grid(Array const& t_obs, Array const& nu_obs, PhotonGrid& photons,
++                                     Real core_edge) {
+     const size_t t_obs_len = t_obs.size();
+     const size_t nu_len = nu_obs.size();
+ 
+     const Array lg2_t_obs = xt::log2(t_obs);
+     const Array lg2_nu_src = xt::log2(nu_obs) + fast_log2(one_plus_z);
+ 
+-    MeshGrid F_nu({nu_len, t_obs_len}, 0);
++    const bool partition = core_edge >= 0.;
++    MeshGrid3d F_nu({partition ? size_t(2) : size_t(1), nu_len, t_obs_len}, 0);
+ 
+     using Photon = std::remove_reference_t<decltype(photons(0, 0, 0))>;
+     NodeTable<Photon> nodes(t_grid, lg2_nu_src);
+@@ -606,7 +624,8 @@ struct NodeTable {
+             }
+ 
+             if (col_first < t_idx) {
+-                xt::noalias(xt::view(F_nu, xt::all(), xt::range(col_first, t_idx))) +=
++                const size_t sector = partition && launch_theta(j) > core_edge ? 1 : 0;
++                xt::noalias(xt::view(F_nu, sector, xt::all(), xt::range(col_first, t_idx))) +=
+                     xt::exp2(xt::view(col_lg2, xt::all(), xt::range(col_first, t_idx)));
+ diff --git a/src/core/observer.h b/src/core/observer.h
+index 5a6c1fa..e8bca23 100644
+--- a/src/core/observer.h
++++ b/src/core/observer.h @@ -606,7 +606,7 @@ struct NodeTable {
+                 xt::exp2(xt::view(col_lg2, xt::all(), xt::range(col_first, t_idx)));
+             }
+         }
+     }
+-    return F_nu;
++    return F_nu;
+ }
+
