@@ -30,12 +30,6 @@ jobs:
       - name: Install wheel builder
         run: python -m pip install --upgrade pip cibuildwheel
 
-      - name: Apply V24 backend patch to upstream commit
-        run: |
-          cd VegasAfterglow
-          git apply --check ../v24-2/angular-flux-cooling.patch
-          git apply ../v24-2/angular-flux-cooling.patch
-
       - name: Build Linux CPython 3.13 wheel
         run: python -m cibuildwheel VegasAfterglow --output-dir wheelhouse
         env:
