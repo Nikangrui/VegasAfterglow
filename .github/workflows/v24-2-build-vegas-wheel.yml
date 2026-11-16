@@ -1,0 +1,47 @@
+name: Temporary VegasAfterglow Linux wheel for GRB251129A V24.2
+
+on:
+  push:
+    branches:
+      - chatgpt-v24-2-vegas-env
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux-cp313:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout temporary workflow branch
+        uses: actions/checkout@v4
+
+      - name: Checkout upstream VegasAfterglow exact latest commit
+        uses: actions/checkout@v4
+        with:
+          repository: YihanWangAstro/VegasAfterglow
+          ref: 45f78985f0821740840712a89cc2a2b012c3514f
+          path: VegasAfterglow
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install wheel builder
+        run: python -m pip install --upgrade pip cibuildwheel
+
+      - name: Build Linux CPython 3.13 wheel
+        run: python -m cibuildwheel VegasAfterglow --output-dir wheelhouse
+        env:
+          CIBW_BUILD: "cp313-manylinux_x86_64"
+          CIBW_ARCHS_LINUX: "x86_64"
+          CIBW_TEST_COMMAND: "python {project}/tests/wheel_smoke.py"
+          CIBW_ENVIRONMENT_LINUX: "CMAKE_ARGS='-DAFTERGLOW_MARCH_NATIVE=OFF'"
+
+      - name: Upload built wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: vegasafterglow-linux-cp313-v24-2
+          path: wheelhouse/*.whl
+          if-no-files-found: error
+          retention-days: 7
